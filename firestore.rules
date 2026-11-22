@@ -1,0 +1,459 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isVerifiedUser() && request.auth.uid == uid;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isStr(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isNum(val, minVal, maxVal) {
+      return (val is int || val is float) && val >= minVal && val <= maxVal;
+    }
+
+    function userRootExistsAfter(uid) {
+      return existsAfter(/databases/$(database)/documents/users/$(uid));
+    }
+
+    // Entity validators
+    function isValidUserRoot(data, uid) {
+      return data.keys().hasAll(['uid', 'lastSyncMs', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'lastSyncMs', 'updatedAt'])
+        && data.uid == uid
+        && isValidId(data.uid)
+        && (!('email' in data) || isStr(data.email, 0, 200))
+        && (!('displayName' in data) || isStr(data.displayName, 0, 120))
+        && isNum(data.lastSyncMs, 0, 9999999999999)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidShopProfile(data, uid, profileId) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'shopName', 'currencySymbol',
+          'nextTicketSeq', 'nextSaleSeq', 'nextBookingSeq', 'activeThemeId', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'shopName', 'shopPhone', 'shopAddress',
+          'currencySymbol', 'receiptFooter', 'nextTicketSeq', 'nextSaleSeq',
+          'nextBookingSeq', 'activeThemeId', 'themePrimary', 'themeHeader',
+          'themeBackground', 'themeSurface', 'themeAccent', 'themeText',
+          'cornerRadius', 'updatedAt'
+        ])
+        && data.id == profileId
+        && data.ownerUid == uid
+        && isValidId(data.id)
+        && isStr(data.shopName, 1, 120)
+        && (!('shopPhone' in data) || isStr(data.shopPhone, 0, 40))
+        && (!('shopAddress' in data) || isStr(data.shopAddress, 0, 240))
+        && isStr(data.currencySymbol, 1, 12)
+        && (!('receiptFooter' in data) || isStr(data.receiptFooter, 0, 200))
+        && isNum(data.nextTicketSeq, 1, 999999999)
+        && isNum(data.nextSaleSeq, 1, 999999999)
+        && isNum(data.nextBookingSeq, 1, 999999999)
+        && isStr(data.activeThemeId, 1, 64)
+        && (!('themePrimary' in data) || isStr(data.themePrimary, 0, 24))
+        && (!('themeHeader' in data) || isStr(data.themeHeader, 0, 24))
+        && (!('themeBackground' in data) || isStr(data.themeBackground, 0, 24))
+        && (!('themeSurface' in data) || isStr(data.themeSurface, 0, 24))
+        && (!('themeAccent' in data) || isStr(data.themeAccent, 0, 24))
+        && (!('themeText' in data) || isStr(data.themeText, 0, 24))
+        && (!('cornerRadius' in data) || isNum(data.cornerRadius, 0, 32))
+        && data.updatedAt == request.time;
+    }
+
+    function isValidSavedTheme(data, uid, themeId) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'name', 'primary', 'header',
+          'background', 'surface', 'accent', 'text', 'cornerRadius', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'name', 'primary', 'header',
+          'background', 'surface', 'accent', 'text', 'cornerRadius', 'isPreset', 'updatedAt'
+        ])
+        && data.id == themeId
+        && data.ownerUid == uid
+        && isValidId(data.id)
+        && isStr(data.name, 1, 80)
+        && isStr(data.primary, 1, 24)
+        && isStr(data.header, 1, 24)
+        && isStr(data.background, 1, 24)
+        && isStr(data.surface, 1, 24)
+        && isStr(data.accent, 1, 24)
+        && isStr(data.text, 1, 24)
+        && isNum(data.cornerRadius, 0, 32)
+        && (!('isPreset' in data) || data.isPreset is bool)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidStaffMember(data, uid, staffKey) {
+      return data.keys().hasAll(['id', 'ownerUid', 'name', 'role', 'active', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerUid', 'name', 'role', 'phone', 'active', 'updatedAt'])
+        && data.id == staffKey
+        && data.ownerUid == uid
+        && isValidId(data.id)
+        && isStr(data.name, 1, 100)
+        && data.role in ['Admin', 'Technician', 'Cashier']
+        && (!('phone' in data) || isStr(data.phone, 0, 40))
+        && data.active is bool
+        && data.updatedAt == request.time;
+    }
+
+    function isValidRepairTicket(data, uid, ticketId) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'ticketNo', 'deviceBarcode', 'customerName',
+          'deviceType', 'faultDescription', 'status', 'laborCharge',
+          'partsTotal', 'discount', 'totalAmount', 'advanceDeposit',
+          'settledAmount', 'balanceDue', 'createdAtMs', 'updatedAtMs', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'ticketNo', 'deviceBarcode', 'customerName', 'customerPhone',
+          'deviceType', 'deviceBrand', 'deviceModel', 'serialNo', 'faultDescription',
+          'diagnosisNotes', 'status', 'assignedStaff', 'laborCharge', 'partsTotal',
+          'discount', 'totalAmount', 'advanceDeposit', 'depositMethod', 'depositPaidAtMs',
+          'settledAmount', 'settlementMethod', 'settledAtMs', 'balanceDue',
+          'createdAtMs', 'updatedAtMs', 'updatedAt'
+        ])
+        && data.id == ticketId
+        && data.ownerUid == uid
+        && isValidId(data.id)
+        && isStr(data.ticketNo, 1, 40)
+        && isStr(data.deviceBarcode, 1, 80)
+        && isStr(data.customerName, 1, 120)
+        && (!('customerPhone' in data) || isStr(data.customerPhone, 0, 40))
+        && isStr(data.deviceType, 1, 80)
+        && (!('deviceBrand' in data) || isStr(data.deviceBrand, 0, 80))
+        && (!('deviceModel' in data) || isStr(data.deviceModel, 0, 100))
+        && (!('serialNo' in data) || isStr(data.serialNo, 0, 100))
+        && isStr(data.faultDescription, 1, 1000)
+        && (!('diagnosisNotes' in data) || isStr(data.diagnosisNotes, 0, 1000))
+        && data.status in ['Received', 'Diagnosing', 'Ready for Pickup', 'Delivered']
+        && (!('assignedStaff' in data) || isStr(data.assignedStaff, 0, 100))
+        && isNum(data.laborCharge, 0, 99999999)
+        && isNum(data.partsTotal, 0, 99999999)
+        && isNum(data.discount, 0, 99999999)
+        && isNum(data.totalAmount, 0, 99999999)
+        && isNum(data.advanceDeposit, 0, 99999999)
+        && (!('depositMethod' in data) || data.depositMethod in ['Cash', 'Card', 'Online', 'None'])
+        && (!('depositPaidAtMs' in data) || isNum(data.depositPaidAtMs, 0, 9999999999999))
+        && isNum(data.settledAmount, 0, 99999999)
+        && (!('settlementMethod' in data) || data.settlementMethod in ['Cash', 'Card', 'Online', 'None'])
+        && (!('settledAtMs' in data) || isNum(data.settledAtMs, 0, 9999999999999))
+        && isNum(data.balanceDue, 0, 99999999)
+        && isNum(data.createdAtMs, 0, 9999999999999)
+        && isNum(data.updatedAtMs, 0, 9999999999999)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidTicketPart(data, uid, partKey) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'ticketId', 'itemName', 'qty',
+          'unitPrice', 'lineTotal', 'addedAtMs', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'ticketId', 'inventoryItemId', 'itemName',
+          'shelfLocation', 'qty', 'unitPrice', 'lineTotal', 'addedAtMs', 'updatedAt'
+        ])
+        && data.id == partKey
+        && data.ownerUid == uid
+        && isValidId(data.id)
+        && isValidId(data.ticketId)
+        && (!('inventoryItemId' in data) || isStr(data.inventoryItemId, 0, 64))
+        && isStr(data.itemName, 1, 140)
+        && (!('shelfLocation' in data) || isStr(data.shelfLocation, 0, 60))
+        && isNum(data.qty, 0.001, 999999)
+        && isNum(data.unitPrice, 0, 99999999)
+        && isNum(data.lineTotal, 0, 99999999)
+        && isNum(data.addedAtMs, 0, 9999999999999)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidTicketTimeline(data, uid, timelineKey) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'ticketId', 'eventType', 'summary', 'createdAtMs', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'ticketId', 'eventType', 'summary', 'actor', 'createdAtMs', 'updatedAt'
+        ])
+        && data.id == timelineKey
+        && data.ownerUid == uid
+        && isValidId(data.id)
+        && isValidId(data.ticketId)
+        && isStr(data.eventType, 1, 40)
+        && isStr(data.summary, 1, 400)
+        && (!('actor' in data) || isStr(data.actor, 0, 100))
+        && isNum(data.createdAtMs, 0, 9999999999999)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidInventoryItem(data, uid, itemKey) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'name', 'shelfLocation', 'qty',
+          'minQty', 'costPrice', 'sellPrice', 'updatedAtMs', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'name', 'sku', 'barcode', 'category', 'shelfLocation',
+          'qty', 'minQty', 'costPrice', 'sellPrice', 'unit', 'stockInTotal',
+          'stockOutTotal', 'updatedAtMs', 'updatedAt'
+        ])
+        && data.id == itemKey
+        && data.ownerUid == uid
+        && isValidId(data.id)
+        && isStr(data.name, 1, 140)
+        && (!('sku' in data) || isStr(data.sku, 0, 60))
+        && (!('barcode' in data) || isStr(data.barcode, 0, 80))
+        && (!('category' in data) || isStr(data.category, 0, 60))
+        && isStr(data.shelfLocation, 0, 60)
+        && isNum(data.qty, 0, 9999999)
+        && isNum(data.minQty, 0, 9999999)
+        && isNum(data.costPrice, 0, 99999999)
+        && isNum(data.sellPrice, 0, 99999999)
+        && (!('unit' in data) || isStr(data.unit, 0, 24))
+        && (!('stockInTotal' in data) || isNum(data.stockInTotal, 0, 99999999))
+        && (!('stockOutTotal' in data) || isNum(data.stockOutTotal, 0, 99999999))
+        && isNum(data.updatedAtMs, 0, 9999999999999)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidPosSale(data, uid, saleId) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'saleNo', 'subtotal', 'discount',
+          'totalAmount', 'paymentMethod', 'amountTendered', 'changeDue', 'createdAtMs', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'saleNo', 'customerName', 'customerPhone',
+          'subtotal', 'discount', 'totalAmount', 'paymentMethod',
+          'amountTendered', 'changeDue', 'staffName', 'createdAtMs', 'updatedAt'
+        ])
+        && data.id == saleId
+        && data.ownerUid == uid
+        && isValidId(data.id)
+        && isStr(data.saleNo, 1, 40)
+        && (!('customerName' in data) || isStr(data.customerName, 0, 120))
+        && (!('customerPhone' in data) || isStr(data.customerPhone, 0, 40))
+        && isNum(data.subtotal, 0, 99999999)
+        && isNum(data.discount, 0, 99999999)
+        && isNum(data.totalAmount, 0, 99999999)
+        && data.paymentMethod in ['Cash', 'Card', 'Online']
+        && isNum(data.amountTendered, 0, 99999999)
+        && isNum(data.changeDue, 0, 99999999)
+        && (!('staffName' in data) || isStr(data.staffName, 0, 100))
+        && isNum(data.createdAtMs, 0, 9999999999999)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidPosSaleItem(data, uid, saleItemKey) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'saleId', 'itemName', 'qty', 'unitPrice', 'lineTotal', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'saleId', 'inventoryItemId', 'itemName', 'qty', 'unitPrice', 'lineTotal', 'updatedAt'
+        ])
+        && data.id == saleItemKey
+        && data.ownerUid == uid
+        && isValidId(data.id)
+        && isValidId(data.saleId)
+        && (!('inventoryItemId' in data) || isStr(data.inventoryItemId, 0, 64))
+        && isStr(data.itemName, 1, 140)
+        && isNum(data.qty, 0.001, 999999)
+        && isNum(data.unitPrice, 0, 99999999)
+        && isNum(data.lineTotal, 0, 99999999)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidWorkshopBooking(data, uid, bookingId) {
+      return data.keys().hasAll([
+          'id', 'ownerUid', 'bookingNo', 'customerName', 'deviceType',
+          'issueSummary', 'scheduledDate', 'status', 'createdAtMs', 'updatedAtMs', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'bookingNo', 'customerName', 'customerPhone',
+          'deviceType', 'deviceModel', 'deviceBarcode', 'issueSummary',
+          'scheduledDate', 'status', 'convertedTicketId', 'createdAtMs', 'updatedAtMs', 'updatedAt'
+        ])
+        && data.id == bookingId
+        && data.ownerUid == uid
+        && isValidId(data.id)
+        && isStr(data.bookingNo, 1, 40)
+        && isStr(data.customerName, 1, 120)
+        && (!('customerPhone' in data) || isStr(data.customerPhone, 0, 40))
+        && isStr(data.deviceType, 1, 80)
+        && (!('deviceModel' in data) || isStr(data.deviceModel, 0, 100))
+        && (!('deviceBarcode' in data) || isStr(data.deviceBarcode, 0, 80))
+        && isStr(data.issueSummary, 1, 500)
+        && isStr(data.scheduledDate, 4, 32)
+        && data.status in ['Scheduled', 'Checked In', 'Cancelled']
+        && (!('convertedTicketId' in data) || isStr(data.convertedTicketId, 0, 64))
+        && isNum(data.createdAtMs, 0, 9999999999999)
+        && isNum(data.updatedAtMs, 0, 9999999999999)
+        && data.updatedAt == request.time;
+    }
+
+    match /users/{uid} {
+      allow get: if isOwner(uid) && isValidId(uid);
+      allow list: if false;
+      allow create: if isOwner(uid) && isValidId(uid) && isValidUserRoot(incoming(), uid);
+      allow update: if isOwner(uid) && isValidId(uid)
+        && isValidUserRoot(incoming(), uid)
+        && incoming().uid == existing().uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'lastSyncMs', 'updatedAt']);
+      allow delete: if false;
+
+      match /shopProfile/{profileId} {
+        allow get: if isOwner(uid) && isValidId(profileId);
+        allow list: if isOwner(uid) && existing().ownerUid == request.auth.uid;
+        allow create: if isOwner(uid) && isValidId(profileId) && isValidShopProfile(incoming(), uid, profileId) && userRootExistsAfter(uid);
+        allow update: if isOwner(uid) && isValidId(profileId) && isValidShopProfile(incoming(), uid, profileId)
+          && incoming().id == existing().id && incoming().ownerUid == existing().ownerUid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'shopName', 'shopPhone', 'shopAddress', 'currencySymbol', 'receiptFooter',
+            'nextTicketSeq', 'nextSaleSeq', 'nextBookingSeq', 'activeThemeId',
+            'themePrimary', 'themeHeader', 'themeBackground', 'themeSurface',
+            'themeAccent', 'themeText', 'cornerRadius', 'updatedAt'
+          ]);
+        allow delete: if isOwner(uid) && isValidId(profileId);
+      }
+
+      match /savedThemes/{themeId} {
+        allow get: if isOwner(uid) && isValidId(themeId);
+        allow list: if isOwner(uid) && existing().ownerUid == request.auth.uid;
+        allow create: if isOwner(uid) && isValidId(themeId) && isValidSavedTheme(incoming(), uid, themeId) && userRootExistsAfter(uid);
+        allow update: if isOwner(uid) && isValidId(themeId) && isValidSavedTheme(incoming(), uid, themeId)
+          && incoming().id == existing().id && incoming().ownerUid == existing().ownerUid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'primary', 'header', 'background', 'surface', 'accent', 'text', 'cornerRadius', 'isPreset', 'updatedAt'
+          ]);
+        allow delete: if isOwner(uid) && isValidId(themeId);
+      }
+
+      match /staff/{staffKey} {
+        allow get: if isOwner(uid) && isValidId(staffKey);
+        allow list: if isOwner(uid) && existing().ownerUid == request.auth.uid;
+        allow create: if isOwner(uid) && isValidId(staffKey) && isValidStaffMember(incoming(), uid, staffKey) && userRootExistsAfter(uid);
+        allow update: if isOwner(uid) && isValidId(staffKey) && isValidStaffMember(incoming(), uid, staffKey)
+          && incoming().id == existing().id && incoming().ownerUid == existing().ownerUid
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'role', 'phone', 'active', 'updatedAt']);
+        allow delete: if isOwner(uid) && isValidId(staffKey);
+      }
+
+      match /tickets/{ticketId} {
+        allow get: if isOwner(uid) && isValidId(ticketId);
+        allow list: if isOwner(uid) && existing().ownerUid == request.auth.uid;
+        allow create: if isOwner(uid) && isValidId(ticketId) && isValidRepairTicket(incoming(), uid, ticketId) && userRootExistsAfter(uid);
+        allow update: if isOwner(uid) && isValidId(ticketId) && isValidRepairTicket(incoming(), uid, ticketId)
+          && incoming().id == existing().id && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAtMs == existing().createdAtMs
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'ticketNo', 'deviceBarcode', 'customerName', 'customerPhone', 'deviceType',
+            'deviceBrand', 'deviceModel', 'serialNo', 'faultDescription', 'diagnosisNotes',
+            'status', 'assignedStaff', 'laborCharge', 'partsTotal', 'discount',
+            'totalAmount', 'advanceDeposit', 'depositMethod', 'depositPaidAtMs',
+            'settledAmount', 'settlementMethod', 'settledAtMs', 'balanceDue',
+            'updatedAtMs', 'updatedAt'
+          ]);
+        allow delete: if isOwner(uid) && isValidId(ticketId);
+      }
+
+      match /ticketParts/{partKey} {
+        allow get: if isOwner(uid) && isValidId(partKey);
+        allow list: if isOwner(uid) && existing().ownerUid == request.auth.uid;
+        allow create: if isOwner(uid) && isValidId(partKey) && isValidTicketPart(incoming(), uid, partKey) && userRootExistsAfter(uid);
+        allow update: if isOwner(uid) && isValidId(partKey) && isValidTicketPart(incoming(), uid, partKey)
+          && incoming().id == existing().id && incoming().ownerUid == existing().ownerUid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'ticketId', 'inventoryItemId', 'itemName', 'shelfLocation', 'qty', 'unitPrice', 'lineTotal', 'addedAtMs', 'updatedAt'
+          ]);
+        allow delete: if isOwner(uid) && isValidId(partKey);
+      }
+
+      match /ticketTimeline/{timelineKey} {
+        allow get: if isOwner(uid) && isValidId(timelineKey);
+        allow list: if isOwner(uid) && existing().ownerUid == request.auth.uid;
+        allow create: if isOwner(uid) && isValidId(timelineKey) && isValidTicketTimeline(incoming(), uid, timelineKey) && userRootExistsAfter(uid);
+        allow update: if false;
+        allow delete: if isOwner(uid) && isValidId(timelineKey);
+      }
+
+      match /inventory/{itemKey} {
+        allow get: if isOwner(uid) && isValidId(itemKey);
+        allow list: if isOwner(uid) && existing().ownerUid == request.auth.uid;
+        allow create: if isOwner(uid) && isValidId(itemKey) && isValidInventoryItem(incoming(), uid, itemKey) && userRootExistsAfter(uid);
+        allow update: if isOwner(uid) && isValidId(itemKey) && isValidInventoryItem(incoming(), uid, itemKey)
+          && incoming().id == existing().id && incoming().ownerUid == existing().ownerUid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'sku', 'barcode', 'category', 'shelfLocation', 'qty', 'minQty',
+            'costPrice', 'sellPrice', 'unit', 'stockInTotal', 'stockOutTotal', 'updatedAtMs', 'updatedAt'
+          ]);
+        allow delete: if isOwner(uid) && isValidId(itemKey);
+      }
+
+      match /posSales/{saleId} {
+        allow get: if isOwner(uid) && isValidId(saleId);
+        allow list: if isOwner(uid) && existing().ownerUid == request.auth.uid;
+        allow create: if isOwner(uid) && isValidId(saleId) && isValidPosSale(incoming(), uid, saleId) && userRootExistsAfter(uid);
+        allow update: if isOwner(uid) && isValidId(saleId) && isValidPosSale(incoming(), uid, saleId)
+          && incoming().id == existing().id && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAtMs == existing().createdAtMs
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'saleNo', 'customerName', 'customerPhone', 'subtotal', 'discount',
+            'totalAmount', 'paymentMethod', 'amountTendered', 'changeDue', 'staffName', 'updatedAt'
+          ]);
+        allow delete: if isOwner(uid) && isValidId(saleId);
+      }
+
+      match /posSaleItems/{saleItemKey} {
+        allow get: if isOwner(uid) && isValidId(saleItemKey);
+        allow list: if isOwner(uid) && existing().ownerUid == request.auth.uid;
+        allow create: if isOwner(uid) && isValidId(saleItemKey) && isValidPosSaleItem(incoming(), uid, saleItemKey) && userRootExistsAfter(uid);
+        allow update: if isOwner(uid) && isValidId(saleItemKey) && isValidPosSaleItem(incoming(), uid, saleItemKey)
+          && incoming().id == existing().id && incoming().ownerUid == existing().ownerUid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'saleId', 'inventoryItemId', 'itemName', 'qty', 'unitPrice', 'lineTotal', 'updatedAt'
+          ]);
+        allow delete: if isOwner(uid) && isValidId(saleItemKey);
+      }
+
+      match /bookings/{bookingId} {
+        allow get: if isOwner(uid) && isValidId(bookingId);
+        allow list: if isOwner(uid) && existing().ownerUid == request.auth.uid;
+        allow create: if isOwner(uid) && isValidId(bookingId) && isValidWorkshopBooking(incoming(), uid, bookingId) && userRootExistsAfter(uid);
+        allow update: if isOwner(uid) && isValidId(bookingId) && isValidWorkshopBooking(incoming(), uid, bookingId)
+          && incoming().id == existing().id && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAtMs == existing().createdAtMs
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'bookingNo', 'customerName', 'customerPhone', 'deviceType', 'deviceModel',
+            'deviceBarcode', 'issueSummary', 'scheduledDate', 'status', 'convertedTicketId',
+            'updatedAtMs', 'updatedAt'
+          ]);
+        allow delete: if isOwner(uid) && isValidId(bookingId);
+      }
+    }
+  }
+}

@@ -1,0 +1,311 @@
+{
+  "entities": {
+    "UserRoot": {
+      "title": "UserRoot",
+      "description": "Root sync metadata document for a signed-in shop owner.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 200 },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "lastSyncMs": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "lastSyncMs", "updatedAt"]
+    },
+    "ShopProfile": {
+      "title": "ShopProfile",
+      "description": "Shop identity, sequence counters, and active theme settings.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "shopName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "shopPhone": { "type": "string", "maxLength": 40 },
+        "shopAddress": { "type": "string", "maxLength": 240 },
+        "currencySymbol": { "type": "string", "minLength": 1, "maxLength": 12 },
+        "receiptFooter": { "type": "string", "maxLength": 200 },
+        "nextTicketSeq": { "type": "number" },
+        "nextSaleSeq": { "type": "number" },
+        "nextBookingSeq": { "type": "number" },
+        "activeThemeId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "themePrimary": { "type": "string", "maxLength": 24 },
+        "themeHeader": { "type": "string", "maxLength": 24 },
+        "themeBackground": { "type": "string", "maxLength": 24 },
+        "themeSurface": { "type": "string", "maxLength": 24 },
+        "themeAccent": { "type": "string", "maxLength": 24 },
+        "themeText": { "type": "string", "maxLength": 24 },
+        "cornerRadius": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "shopName",
+        "currencySymbol",
+        "nextTicketSeq",
+        "nextSaleSeq",
+        "nextBookingSeq",
+        "activeThemeId",
+        "updatedAt"
+      ]
+    },
+    "SavedTheme": {
+      "title": "SavedTheme",
+      "description": "Saved custom or preset UI theme configuration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "primary": { "type": "string", "maxLength": 24 },
+        "header": { "type": "string", "maxLength": 24 },
+        "background": { "type": "string", "maxLength": 24 },
+        "surface": { "type": "string", "maxLength": 24 },
+        "accent": { "type": "string", "maxLength": 24 },
+        "text": { "type": "string", "maxLength": 24 },
+        "cornerRadius": { "type": "number" },
+        "isPreset": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "name", "primary", "header", "background", "surface", "accent", "text", "cornerRadius", "updatedAt"]
+    },
+    "StaffMember": {
+      "title": "StaffMember",
+      "description": "Workshop technician or POS cashier record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "role": { "type": "string", "enum": ["Admin", "Technician", "Cashier"] },
+        "phone": { "type": "string", "maxLength": 40 },
+        "active": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "name", "role", "active", "updatedAt"]
+    },
+    "RepairTicket": {
+      "title": "RepairTicket",
+      "description": "Independent repair job ticket with preserved historical pricing and device barcode.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ticketNo": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "deviceBarcode": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "customerName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "customerPhone": { "type": "string", "maxLength": 40 },
+        "deviceType": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "deviceBrand": { "type": "string", "maxLength": 80 },
+        "deviceModel": { "type": "string", "maxLength": 100 },
+        "serialNo": { "type": "string", "maxLength": 100 },
+        "faultDescription": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "diagnosisNotes": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["Received", "Diagnosing", "Ready for Pickup", "Delivered"] },
+        "assignedStaff": { "type": "string", "maxLength": 100 },
+        "laborCharge": { "type": "number" },
+        "partsTotal": { "type": "number" },
+        "discount": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "advanceDeposit": { "type": "number" },
+        "depositMethod": { "type": "string", "enum": ["Cash", "Card", "Online", "None"] },
+        "depositPaidAtMs": { "type": "number" },
+        "settledAmount": { "type": "number" },
+        "settlementMethod": { "type": "string", "enum": ["Cash", "Card", "Online", "None"] },
+        "settledAtMs": { "type": "number" },
+        "balanceDue": { "type": "number" },
+        "createdAtMs": { "type": "number" },
+        "updatedAtMs": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "ownerUid",
+        "ticketNo",
+        "deviceBarcode",
+        "customerName",
+        "deviceType",
+        "faultDescription",
+        "status",
+        "laborCharge",
+        "partsTotal",
+        "discount",
+        "totalAmount",
+        "advanceDeposit",
+        "settledAmount",
+        "balanceDue",
+        "createdAtMs",
+        "updatedAtMs",
+        "updatedAt"
+      ]
+    },
+    "TicketPart": {
+      "title": "TicketPart",
+      "description": "Spare part line attached to a repair ticket.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ticketId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "inventoryItemId": { "type": "string", "maxLength": 64 },
+        "itemName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "shelfLocation": { "type": "string", "maxLength": 60 },
+        "qty": { "type": "number" },
+        "unitPrice": { "type": "number" },
+        "lineTotal": { "type": "number" },
+        "addedAtMs": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "ticketId", "itemName", "qty", "unitPrice", "lineTotal", "addedAtMs", "updatedAt"]
+    },
+    "TicketTimelineEntry": {
+      "title": "TicketTimelineEntry",
+      "description": "Immutable event log entry for a repair ticket.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ticketId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "eventType": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 400 },
+        "actor": { "type": "string", "maxLength": 100 },
+        "createdAtMs": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "ticketId", "eventType", "summary", "createdAtMs", "updatedAt"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Spare part or stock item with rack shelf location.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "sku": { "type": "string", "maxLength": 60 },
+        "barcode": { "type": "string", "maxLength": 80 },
+        "category": { "type": "string", "maxLength": 60 },
+        "shelfLocation": { "type": "string", "maxLength": 60 },
+        "qty": { "type": "number" },
+        "minQty": { "type": "number" },
+        "costPrice": { "type": "number" },
+        "sellPrice": { "type": "number" },
+        "unit": { "type": "string", "maxLength": 24 },
+        "stockInTotal": { "type": "number" },
+        "stockOutTotal": { "type": "number" },
+        "updatedAtMs": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "name", "shelfLocation", "qty", "minQty", "costPrice", "sellPrice", "updatedAtMs", "updatedAt"]
+    },
+    "PosSale": {
+      "title": "PosSale",
+      "description": "Counter POS sale invoice.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "saleNo": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "customerName": { "type": "string", "maxLength": 120 },
+        "customerPhone": { "type": "string", "maxLength": 40 },
+        "subtotal": { "type": "number" },
+        "discount": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["Cash", "Card", "Online"] },
+        "amountTendered": { "type": "number" },
+        "changeDue": { "type": "number" },
+        "staffName": { "type": "string", "maxLength": 100 },
+        "createdAtMs": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "saleNo", "subtotal", "discount", "totalAmount", "paymentMethod", "amountTendered", "changeDue", "createdAtMs", "updatedAt"]
+    },
+    "PosSaleItem": {
+      "title": "PosSaleItem",
+      "description": "Line item inside a counter POS sale.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "saleId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "inventoryItemId": { "type": "string", "maxLength": 64 },
+        "itemName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "qty": { "type": "number" },
+        "unitPrice": { "type": "number" },
+        "lineTotal": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "saleId", "itemName", "qty", "unitPrice", "lineTotal", "updatedAt"]
+    },
+    "WorkshopBooking": {
+      "title": "WorkshopBooking",
+      "description": "Scheduled repair intake booking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "bookingNo": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "customerName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "customerPhone": { "type": "string", "maxLength": 40 },
+        "deviceType": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "deviceModel": { "type": "string", "maxLength": 100 },
+        "deviceBarcode": { "type": "string", "maxLength": 80 },
+        "issueSummary": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "scheduledDate": { "type": "string", "minLength": 4, "maxLength": 32 },
+        "status": { "type": "string", "enum": ["Scheduled", "Checked In", "Cancelled"] },
+        "convertedTicketId": { "type": "string", "maxLength": 64 },
+        "createdAtMs": { "type": "number" },
+        "updatedAtMs": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "ownerUid", "bookingNo", "customerName", "deviceType", "issueSummary", "scheduledDate", "status", "createdAtMs", "updatedAtMs", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": { "$ref": "#/entities/UserRoot" },
+      "description": "User sync root document"
+    },
+    "/users/{uid}/shopProfile/{profileId}": {
+      "schema": { "$ref": "#/entities/ShopProfile" },
+      "description": "Shop profile and theme config"
+    },
+    "/users/{uid}/savedThemes/{themeId}": {
+      "schema": { "$ref": "#/entities/SavedTheme" },
+      "description": "Saved custom and preset themes"
+    },
+    "/users/{uid}/staff/{staffKey}": {
+      "schema": { "$ref": "#/entities/StaffMember" },
+      "description": "Workshop staff members"
+    },
+    "/users/{uid}/tickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/RepairTicket" },
+      "description": "Independent repair job tickets"
+    },
+    "/users/{uid}/ticketParts/{partKey}": {
+      "schema": { "$ref": "#/entities/TicketPart" },
+      "description": "Parts attached to repair tickets"
+    },
+    "/users/{uid}/ticketTimeline/{timelineKey}": {
+      "schema": { "$ref": "#/entities/TicketTimelineEntry" },
+      "description": "Ticket activity timeline"
+    },
+    "/users/{uid}/inventory/{itemKey}": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "Spare parts inventory and rack assignments"
+    },
+    "/users/{uid}/posSales/{saleId}": {
+      "schema": { "$ref": "#/entities/PosSale" },
+      "description": "POS counter sales"
+    },
+    "/users/{uid}/posSaleItems/{saleItemKey}": {
+      "schema": { "$ref": "#/entities/PosSaleItem" },
+      "description": "Line items for POS counter sales"
+    },
+    "/users/{uid}/bookings/{bookingId}": {
+      "schema": { "$ref": "#/entities/WorkshopBooking" },
+      "description": "Scheduled repair bookings"
+    }
+  }
+}

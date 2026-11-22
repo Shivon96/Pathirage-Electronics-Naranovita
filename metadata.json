@@ -1,0 +1,6 @@
+{
+  "name": "Store",
+  "description": "Electronics & appliance repair workshop and spare parts POS. Powered by Sahasna Tech Solution, Elpitiya • 0702809995",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
