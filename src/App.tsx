@@ -1,7 +1,9 @@
 import React, { useRef, useState } from 'react';
 import {
   BarChart3,
+  CloudUpload,
   Home,
+  MailCheck,
   Package,
   QrCode,
   Settings,
@@ -11,7 +13,9 @@ import {
 import { BarcodeScannerModal } from './components/BarcodeScannerModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LoginScreen } from './components/LoginScreen';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { PrintModal } from './components/PrintModal';
+import { PWAInstallButton } from './components/PWAInstallButton';
 import { StoreProvider, useStore } from './context/StoreContext';
 import { DashboardPage, type NavTab } from './pages/DashboardPage';
 import { PosPage } from './pages/PosPage';
@@ -31,18 +35,27 @@ const NAV_ITEMS: { id: NavTab; label: string; icon: React.FC<{ className?: strin
 ];
 
 const StoreShell: React.FC = () => {
-  const { authMode, snapshot } = useStore();
+  const {
+    authMode,
+    user,
+    snapshot,
+    hasOfflinePendingData,
+    syncOfflineLocalDataToAccount,
+    resendVerificationEmail,
+    refreshVerificationAndSync,
+  } = useStore();
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [ticketSearch, setTicketSearch] = useState('');
   const [createTicketSignal, setCreateTicketSignal] = useState(0);
   const [printJob, setPrintJob] = useState<PrintJob | null>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [verifyMsg, setVerifyMsg] = useState<string | null>(null);
   const scanCallbackRef = useRef<((code: string) => void) | null>(null);
 
   if (authMode === 'loading') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-700 text-sm font-semibold">
+      <div className="min-h-[100dvh] flex items-center justify-center bg-slate-50 text-slate-700 text-sm font-semibold">
         Loading Store...
       </div>
     );
@@ -65,7 +78,6 @@ const StoreShell: React.FC = () => {
       cb(code);
       return;
     }
-    // Default global scan: check if it matches an inventory item or repair device barcode
     setTicketSearch(code);
     setSelectedTicketId(null);
     setActiveTab('tickets');
@@ -83,17 +95,18 @@ const StoreShell: React.FC = () => {
   };
 
   const pageTitle = NAV_ITEMS.find((n) => n.id === activeTab)?.label || 'Store';
+  const needsVerification = authMode === 'google' && Boolean(user) && !user?.emailVerified;
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row">
+    <div className="min-h-[100dvh] w-full max-w-full overflow-x-hidden flex flex-col md:flex-row">
       {/* Desktop / Tablet Side Navigation Rail */}
-      <aside className="no-print hidden md:flex md:flex-col md:w-60 shrink-0 store-header-bg text-white">
+      <aside className="no-print hidden md:flex md:flex-col md:w-60 lg:w-64 shrink-0 store-header-bg text-white sticky top-0 h-[100dvh]">
         <div className="px-5 py-5 border-b border-white/10">
           <div className="text-xl font-extrabold tracking-tight truncate">{snapshot.shopProfile.shopName || 'Store'}</div>
           <div className="text-[11px] text-slate-300 mt-1 leading-snug">Sahasna Tech Solution · Elpitiya</div>
         </div>
 
-        <nav className="flex-1 p-3 space-y-1" aria-label="Primary Sidebar Navigation">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto" aria-label="Primary Sidebar Navigation">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const active = activeTab === item.id;
@@ -113,17 +126,26 @@ const StoreShell: React.FC = () => {
           })}
         </nav>
 
-        <div className="p-4 border-t border-white/10 text-[11px] text-slate-400">
-          {authMode === 'google' ? 'Cloud Sync Connected' : 'Local Browser Storage'}
+        <div className="p-3.5 border-t border-white/10 space-y-2.5">
+          <PWAInstallButton variant="sidebar" />
+          <div className="text-[11px] text-slate-400 px-1">
+            {authMode === 'google'
+              ? needsVerification
+                ? 'Local Saved · Verify Email for Cloud'
+                : 'Cloud Sync & Offline Cache Ready'
+              : 'Local Browser Storage Mode'}
+          </div>
         </div>
       </aside>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 w-full">
+        <OfflineIndicator />
+
         {/* Top Bar (3-zone compact) */}
-        <header className="no-print sticky top-0 z-30 bg-white border-b border-slate-200 px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <span className="md:hidden text-base font-extrabold text-slate-900 whitespace-nowrap shrink-0">
+        <header className="no-print sticky top-0 z-30 bg-white border-b border-slate-200 px-3 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-4">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="md:hidden text-base font-extrabold text-slate-900 whitespace-nowrap truncate">
               {snapshot.shopProfile.shopName || 'Store'}
             </span>
             <h1 className="hidden md:block text-lg font-extrabold text-slate-900 whitespace-nowrap shrink-0">
@@ -131,27 +153,86 @@ const StoreShell: React.FC = () => {
             </h1>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <div className="md:hidden">
+              <PWAInstallButton variant="header" />
+            </div>
             <button
               type="button"
               onClick={() => openScanner()}
-              className="min-h-[40px] px-3 border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 rounded-[8px] text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+              className="min-h-[40px] px-2.5 sm:px-3 border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 rounded-[8px] text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
             >
               <QrCode className="w-4 h-4" />
-              <span>Scan</span>
+              <span className="hidden xs:inline sm:inline">Scan</span>
             </button>
             <button
               type="button"
               onClick={handleNewRepair}
-              className="min-h-[40px] px-3.5 store-primary-btn text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+              className="min-h-[40px] px-3 sm:px-3.5 store-primary-btn text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer"
             >
-              + New Repair
+              + Repair
             </button>
           </div>
         </header>
 
         {/* Scrollable Workspace */}
-        <main className="no-print flex-1 p-4 sm:p-6 pb-24 md:pb-8 max-w-7xl w-full mx-auto">
+        <main className="no-print flex-1 p-3 sm:p-6 pb-24 md:pb-8 max-w-7xl w-full mx-auto space-y-4">
+          {/* Email Verification Banner for newly created Email/Password Firebase accounts */}
+          {needsVerification && (
+            <div className="bg-amber-50 border border-amber-200 rounded-[10px] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 text-xs sm:text-sm text-amber-900">
+                <MailCheck className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">Verify your email to enable Cloud Sync.</span> Data is currently saved
+                  safely in offline local storage. Check {user?.email} for the verification link.
+                  {verifyMsg && <div className="font-semibold text-emerald-800 mt-1">{verifyMsg}</div>}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await resendVerificationEmail();
+                    setVerifyMsg('Verification email resent.');
+                  }}
+                  className="min-h-[38px] px-3 bg-white border border-amber-300 rounded-[8px] text-xs font-semibold text-amber-900 cursor-pointer"
+                >
+                  Resend Email
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const ok = await refreshVerificationAndSync();
+                    setVerifyMsg(ok ? 'Verified and synced to Cloud!' : 'Not verified yet — please check your inbox.');
+                  }}
+                  className="min-h-[38px] px-3 bg-amber-700 text-white rounded-[8px] text-xs font-semibold cursor-pointer"
+                >
+                  I Verified
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Merge Offline Data Banner when user created data offline before signing in */}
+          {authMode === 'google' && hasOfflinePendingData && (
+            <div className="bg-blue-50 border border-blue-200 rounded-[10px] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 text-xs sm:text-sm text-blue-900">
+                <CloudUpload className="w-5 h-5 text-blue-700 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">Offline local records detected.</span> Upload your offline tickets,
+                  stock, and POS bills into this Firebase account?
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void syncOfflineLocalDataToAccount()}
+                className="min-h-[40px] px-4 store-primary-btn text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                Sync Offline Data Now
+              </button>
+            </div>
+          )}
+
           {activeTab === 'home' && (
             <DashboardPage
               onNavigate={setActiveTab}
@@ -188,7 +269,7 @@ const StoreShell: React.FC = () => {
 
       {/* Mobile Bottom Navigation Bar */}
       <nav
-        className="no-print md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 grid grid-cols-6 h-16"
+        className="no-print md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 grid grid-cols-6 min-h-[60px] pb-[env(safe-area-inset-bottom)]"
         aria-label="Mobile Navigation"
       >
         {NAV_ITEMS.map((item) => {
@@ -199,7 +280,7 @@ const StoreShell: React.FC = () => {
               key={item.id}
               type="button"
               onClick={() => setActiveTab(item.id)}
-              className={`min-h-[48px] flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold cursor-pointer ${
+              className={`min-h-[48px] py-1.5 flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold cursor-pointer ${
                 active ? 'text-blue-700' : 'text-slate-500'
               }`}
             >

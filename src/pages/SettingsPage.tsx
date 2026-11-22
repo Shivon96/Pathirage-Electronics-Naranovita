@@ -10,6 +10,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { AdminLock } from '../components/AdminLock';
+import { PWAInstallButton } from '../components/PWAInstallButton';
 import { ThemeEditor } from '../components/ThemeEditor';
 import { useStore } from '../context/StoreContext';
 import type { StaffRole, StoreBackupPayload } from '../types';
@@ -183,6 +184,19 @@ export const SettingsPage: React.FC = () => {
               </>
             )}
           </div>
+        </div>
+      </section>
+
+      {/* Install App (Android & PC) */}
+      <section className="store-card border border-slate-200 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-bold text-slate-900">Install App (Android &amp; PC)</h2>
+          <p className="text-xs text-slate-600 mt-0.5">
+            Install Store as a standalone app on Android phones or Windows/Mac/Linux PCs with offline caching.
+          </p>
+        </div>
+        <div className="shrink-0">
+          <PWAInstallButton variant="header" />
         </div>
       </section>
 

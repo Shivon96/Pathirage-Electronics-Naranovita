@@ -1,5 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  sendEmailVerification,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+  updateProfile,
+  type User,
+} from 'firebase/auth';
 import {
   collection,
   deleteDoc,
@@ -87,6 +96,12 @@ interface StoreContextValue {
   syncError: string | null;
   lastCloudSyncMs: number;
   signInWithGoogle: () => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
+  createFirebaseAccount: (email: string, password: string, displayName: string) => Promise<void>;
+  resendVerificationEmail: () => Promise<void>;
+  refreshVerificationAndSync: () => Promise<boolean>;
+  hasOfflinePendingData: boolean;
+  syncOfflineLocalDataToAccount: () => Promise<void>;
   continueOffline: () => Promise<void>;
   signOutUser: () => Promise<void>;
   updateShopProfile: (patch: Partial<ShopProfile>) => Promise<void>;
@@ -149,11 +164,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [lastCloudSyncMs, setLastCloudSyncMs] = useState(0);
+  const [hasOfflinePendingData, setHasOfflinePendingData] = useState(false);
 
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
 
   const activeUid = user?.uid || OFFLINE_UID;
+  const canCloudSync = authMode === 'google' && Boolean(user?.emailVerified);
 
   // Apply active theme CSS variables immediately
   useEffect(() => {
@@ -249,9 +266,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
         setAuthMode('google');
         setSyncError(null);
-        void ensureCloudInitialized(firebaseUser);
+        const offlineSnap = await loadLocalSnapshot(OFFLINE_UID);
+        const offlineHasRecords = Boolean(
+          offlineSnap &&
+            (offlineSnap.tickets.length > 0 ||
+              offlineSnap.inventory.length > 0 ||
+              offlineSnap.posSales.length > 0 ||
+              offlineSnap.bookings.length > 0)
+        );
+        setHasOfflinePendingData(offlineHasRecords);
+        if (firebaseUser.emailVerified) {
+          void ensureCloudInitialized(firebaseUser);
+        }
       } else {
         setUser(null);
+        setHasOfflinePendingData(false);
         const isOffline = localStorage.getItem(OFFLINE_FLAG_KEY) === 'true';
         if (isOffline) {
           const cached = await loadLocalSnapshot(OFFLINE_UID);
@@ -265,9 +294,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => unsub();
   }, [ensureCloudInitialized]);
 
-  // Real-time Firestore listeners when signed in via Google
+  // Real-time Firestore listeners when signed in and email verified
   useEffect(() => {
-    if (authMode !== 'google' || !user) return;
+    if (!canCloudSync || !user) return;
     const uid = user.uid;
     const unsubs: (() => void)[] = [];
 
@@ -429,7 +458,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [authMode, user]);
+  }, [canCloudSync, user]);
 
   // Helper to commit batch or single writes + touch users/{uid}.lastSyncMs
   const touchUserSync = useCallback(async (uid: string, nowMs: number) => {
@@ -455,6 +484,30 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await signInWithPopup(auth, googleProvider);
   }, []);
 
+  const signInWithEmail = useCallback(async (email: string, password: string) => {
+    setSyncError(null);
+    await signInWithEmailAndPassword(auth, email.trim(), password);
+  }, []);
+
+  const createFirebaseAccount = useCallback(async (email: string, password: string, displayName: string) => {
+    setSyncError(null);
+    const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+    if (displayName.trim()) {
+      await updateProfile(cred.user, { displayName: displayName.trim() });
+    }
+    try {
+      await sendEmailVerification(cred.user);
+    } catch {
+      // Non-fatal if verification email throttled
+    }
+  }, []);
+
+  const resendVerificationEmail = useCallback(async () => {
+    if (auth.currentUser && !auth.currentUser.emailVerified) {
+      await sendEmailVerification(auth.currentUser);
+    }
+  }, []);
+
   const continueOffline = useCallback(async () => {
     localStorage.setItem(OFFLINE_FLAG_KEY, 'true');
     const cached = await loadLocalSnapshot(OFFLINE_UID);
@@ -476,7 +529,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const uid = activeUid;
       const merged = sanitizeShopProfile({ ...snapshotRef.current.shopProfile, ...patch }, uid);
       setSnapshot((prev) => ({ ...prev, shopProfile: merged, lastSyncMs: Date.now() }));
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         const nowMs = Date.now();
         try {
           await setDoc(doc(db, 'users', uid, 'shopProfile', 'default'), {
@@ -519,7 +572,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           : [...prev.savedThemes, clean];
         return { ...prev, savedThemes, lastSyncMs: Date.now() };
       });
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         try {
           await setDoc(doc(db, 'users', uid, 'savedThemes', clean.id), {
             ...clean,
@@ -541,7 +594,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         ...prev,
         savedThemes: prev.savedThemes.filter((t) => t.id !== themeId),
       }));
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         try {
           await deleteDoc(doc(db, 'users', uid, 'savedThemes', themeId));
           await touchUserSync(uid, Date.now());
@@ -562,7 +615,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const staff = exists ? prev.staff.map((s) => (s.id === clean.id ? clean : s)) : [...prev.staff, clean];
         return { ...prev, staff };
       });
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         try {
           await setDoc(doc(db, 'users', uid, 'staff', clean.id), {
             ...clean,
@@ -584,7 +637,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         ...prev,
         staff: prev.staff.filter((s) => s.id !== staffId),
       }));
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         try {
           await deleteDoc(doc(db, 'users', uid, 'staff', staffId));
           await touchUserSync(uid, Date.now());
@@ -668,7 +721,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         lastSyncMs: nowMs,
       }));
 
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         try {
           const batch = writeBatch(db);
           batch.set(doc(db, 'users', uid, 'tickets', ticket.id), { ...ticket, updatedAt: serverTimestamp() });
@@ -757,7 +810,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         lastSyncMs: nowMs,
       }));
 
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         try {
           const batch = writeBatch(db);
           batch.set(doc(db, 'users', uid, 'tickets', ticketId), { ...updated, updatedAt: serverTimestamp() });
@@ -890,7 +943,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         lastSyncMs: nowMs,
       }));
 
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         try {
           const batch = writeBatch(db);
           batch.set(doc(db, 'users', uid, 'ticketParts', part.id), { ...part, updatedAt: serverTimestamp() });
@@ -981,7 +1034,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         lastSyncMs: nowMs,
       }));
 
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         try {
           const batch = writeBatch(db);
           batch.delete(doc(db, 'users', uid, 'ticketParts', partId));
@@ -1045,7 +1098,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return { ...prev, inventory, lastSyncMs: nowMs };
       });
 
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         try {
           await setDoc(doc(db, 'users', uid, 'inventory', clean.id), {
             ...clean,
@@ -1069,7 +1122,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         ...prev,
         inventory: prev.inventory.filter((i) => i.id !== itemId),
       }));
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         try {
           await deleteDoc(doc(db, 'users', uid, 'inventory', itemId));
           await touchUserSync(uid, Date.now());
@@ -1100,7 +1153,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         lastSyncMs: nowMs,
       }));
 
-      if (authMode === 'google' && user && updatedItems.length > 0) {
+      if (canCloudSync && user && updatedItems.length > 0) {
         try {
           const batch = writeBatch(db);
           for (const item of updatedItems) {
@@ -1210,7 +1263,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         lastSyncMs: nowMs,
       }));
 
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         try {
           const batch = writeBatch(db);
           batch.set(doc(db, 'users', uid, 'posSales', sale.id), { ...sale, updatedAt: serverTimestamp() });
@@ -1282,7 +1335,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         lastSyncMs: nowMs,
       }));
 
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         try {
           const batch = writeBatch(db);
           batch.set(doc(db, 'users', uid, 'bookings', booking.id), { ...booking, updatedAt: serverTimestamp() });
@@ -1328,7 +1381,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         lastSyncMs: nowMs,
       }));
 
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         try {
           await setDoc(doc(db, 'users', uid, 'bookings', bookingId), {
             ...updated,
@@ -1456,12 +1509,52 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const backupNow = useCallback(async () => {
-    if (authMode !== 'google' || !user) return;
+    if (!canCloudSync || !user) return;
     await pushFullSnapshotToCloud(user.uid, snapshotRef.current);
-  }, [authMode, pushFullSnapshotToCloud, user]);
+  }, [canCloudSync, pushFullSnapshotToCloud, user]);
+
+  const refreshVerificationAndSync = useCallback(async (): Promise<boolean> => {
+    if (!auth.currentUser) return false;
+    await auth.currentUser.reload();
+    const refreshed = auth.currentUser;
+    setUser(refreshed);
+    if (refreshed.emailVerified) {
+      await ensureCloudInitialized(refreshed);
+      await pushFullSnapshotToCloud(refreshed.uid, snapshotRef.current);
+      return true;
+    }
+    return false;
+  }, [ensureCloudInitialized, pushFullSnapshotToCloud]);
+
+  const syncOfflineLocalDataToAccount = useCallback(async () => {
+    if (!user) return;
+    const offlineSnap = await loadLocalSnapshot(OFFLINE_UID);
+    if (!offlineSnap) return;
+    const uid = user.uid;
+    const merged: StoreSnapshot = {
+      ...offlineSnap,
+      shopProfile: sanitizeShopProfile(offlineSnap.shopProfile, uid),
+      savedThemes: offlineSnap.savedThemes.map((t) => sanitizeSavedTheme(t, uid)),
+      staff: offlineSnap.staff.map((s) => sanitizeStaffMember(s, uid)),
+      tickets: offlineSnap.tickets.map((t) => sanitizeRepairTicket(t, uid)),
+      ticketParts: offlineSnap.ticketParts.map((tp) => sanitizeTicketPart(tp, uid)),
+      ticketTimeline: offlineSnap.ticketTimeline.map((tl) => sanitizeTicketTimeline(tl, uid)),
+      inventory: offlineSnap.inventory.map((i) => sanitizeInventoryItem(i, uid)),
+      posSales: offlineSnap.posSales.map((s) => sanitizePosSale(s, uid)),
+      posSaleItems: offlineSnap.posSaleItems.map((si) => sanitizePosSaleItem(si, uid)),
+      bookings: offlineSnap.bookings.map((b) => sanitizeWorkshopBooking(b, uid)),
+      lastSyncMs: Date.now(),
+    };
+    setSnapshot(merged);
+    await saveLocalSnapshot(uid, merged);
+    setHasOfflinePendingData(false);
+    if (user.emailVerified) {
+      await pushFullSnapshotToCloud(uid, merged);
+    }
+  }, [pushFullSnapshotToCloud, user]);
 
   const restoreFromCloud = useCallback(async () => {
-    if (authMode !== 'google' || !user) return;
+    if (!canCloudSync || !user) return;
     const uid = user.uid;
     setIsSyncing(true);
     setSyncError(null);
@@ -1516,7 +1609,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } finally {
       setIsSyncing(false);
     }
-  }, [authMode, user]);
+  }, [canCloudSync, user]);
 
   const exportJsonBackup = useCallback((): StoreBackupPayload => {
     return {
@@ -1545,11 +1638,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         lastSyncMs: Date.now(),
       };
       setSnapshot(sanitized);
-      if (authMode === 'google' && user) {
+      if (canCloudSync && user) {
         await pushFullSnapshotToCloud(user.uid, sanitized);
       }
     },
-    [activeUid, authMode, pushFullSnapshotToCloud, user]
+    [activeUid, canCloudSync, pushFullSnapshotToCloud, user]
   );
 
   const clearShopData = useCallback(async () => {
@@ -1567,7 +1660,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const prev = snapshotRef.current;
     setSnapshot(empty);
 
-    if (authMode === 'google' && user) {
+    if (canCloudSync && user) {
       setIsSyncing(true);
       try {
         const deletes: ReturnType<typeof doc>[] = [
@@ -1593,7 +1686,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsSyncing(false);
       }
     }
-  }, [activeUid, authMode, pushFullSnapshotToCloud, user]);
+  }, [activeUid, canCloudSync, pushFullSnapshotToCloud, user]);
 
   const value = useMemo<StoreContextValue>(
     () => ({
@@ -1604,6 +1697,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       syncError,
       lastCloudSyncMs,
       signInWithGoogle,
+      signInWithEmail,
+      createFirebaseAccount,
+      resendVerificationEmail,
+      refreshVerificationAndSync,
+      hasOfflinePendingData,
+      syncOfflineLocalDataToAccount,
       continueOffline,
       signOutUser,
       updateShopProfile,
@@ -1638,6 +1737,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       syncError,
       lastCloudSyncMs,
       signInWithGoogle,
+      signInWithEmail,
+      createFirebaseAccount,
+      resendVerificationEmail,
+      refreshVerificationAndSync,
+      hasOfflinePendingData,
+      syncOfflineLocalDataToAccount,
       continueOffline,
       signOutUser,
       updateShopProfile,
